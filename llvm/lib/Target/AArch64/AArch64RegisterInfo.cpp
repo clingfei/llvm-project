@@ -320,6 +320,17 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   markSuperRegs(Reserved, AArch64::WSP);
   markSuperRegs(Reserved, AArch64::WZR);
+  
+  markSuperRegs(Reserved, AArch64::X18);
+  markSuperRegs(Reserved, AArch64::X21);
+  markSuperRegs(Reserved, AArch64::X22);
+  markSuperRegs(Reserved, AArch64::X23);
+  markSuperRegs(Reserved, AArch64::X24);
+  markSuperRegs(Reserved, AArch64::W18);
+  markSuperRegs(Reserved, AArch64::W21);
+  markSuperRegs(Reserved, AArch64::W22);
+  markSuperRegs(Reserved, AArch64::W23);
+  markSuperRegs(Reserved, AArch64::W24);
 
   if (TFI->hasFP(MF) || TT.isOSDarwin())
     markSuperRegs(Reserved, AArch64::W29);
@@ -335,11 +346,7 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // SLH uses register W16/X16 as the taint register.
   if (MF.getFunction().hasFnAttribute(Attribute::SpeculativeLoadHardening))
     markSuperRegs(Reserved, AArch64::W16);
-  Reserved.set(AArch64::X18);
-  Reserved.set(AArch64::X21);
-  Reserved.set(AArch64::X22);
-  Reserved.set(AArch64::X23);
-  Reserved.set(AArch64::X24);
+
   assert(checkAllSuperRegsMarked(Reserved));
   return Reserved;
 }
