@@ -3659,6 +3659,7 @@ libc_function(
         ":__support_complex_basic_ops",
         ":__support_macros_config",
         ":__support_macros_properties_complex_types",
+        ":llvm_libc_types_cfloat16",
     ],
 )
 
@@ -3720,6 +3721,7 @@ libc_function(
         ":__support_cpp_bit",
         ":__support_macros_config",
         ":__support_macros_properties_complex_types",
+        ":llvm_libc_types_cfloat16",
     ],
 )
 
@@ -4166,7 +4168,12 @@ libc_math_function(name = "f16addl")
 
 libc_math_function(name = "f16div")
 
-libc_math_function(name = "f16divf")
+libc_math_function(
+    name = "f16divf",
+    additional_deps = [
+        ":__support_math_expm1f16",
+    ],
+)
 
 libc_math_function(name = "f16divf128")
 
