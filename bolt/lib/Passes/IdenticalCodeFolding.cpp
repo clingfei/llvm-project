@@ -33,6 +33,8 @@ namespace opts {
 
 extern cl::OptionCategory BoltOptCategory;
 
+extern bool isHotTextMover(const BinaryFunction &Function);
+
 static cl::opt<bool>
     ICFUseDFS("icf-dfs", cl::desc("use DFS ordering when using -icf option"),
               cl::ReallyHidden, cl::cat(BoltOptCategory));
@@ -185,6 +187,11 @@ static bool isInstrEquivalentWith(const MCInst &InstA,
 static bool isIdenticalWith(const BinaryFunction &A, const BinaryFunction &B,
                             bool CongruentSymbols) {
   assert(A.hasCFG() && B.hasCFG() && "both functions should have CFG");
+
+  // Hot text mover functions should not be folded. They need to stay in their
+  // original section to avoid being placed on hot/huge pages.
+  if (opts::isHotTextMover(A) || opts::isHotTextMover(B))
+    return false;
 
   // Compare the two functions, one basic block at a time.
   // Currently we require two identical basic blocks to have identical
@@ -368,8 +375,8 @@ typedef std::unordered_map<BinaryFunction *, std::set<BinaryFunction *>,
                            KeyHash, KeyCongruent>
     CongruentBucketsMap;
 
-typedef std::unordered_map<BinaryFunction *, std::vector<BinaryFunction *>,
-                           KeyHash, KeyEqual>
+typedef std::unordered_map<BinaryFunction *, BinaryFunctionListType, KeyHash,
+                           KeyEqual>
     IdenticalBucketsMap;
 
 namespace llvm {
@@ -380,7 +387,8 @@ void IdenticalCodeFolding::initVTableReferences(const BinaryContext &BC) {
     if (!Data->getName().starts_with("_ZTV") && // vtable
         !Data->getName().starts_with("_ZTCN"))  // construction vtable
       continue;
-    for (uint64_t I = Address, End = I + Data->getSize(); I < End; I += 8)
+    for (uint64_t I = Address, End = I + Data->getSize(); I < End;
+         I += VTableAddressGranularity)
       setAddressUsedInVTable(I);
   }
 }
@@ -521,7 +529,7 @@ Error IdenticalCodeFolding::runOnFunctions(BinaryContext &BC) {
 
       for (auto &IBI : IdenticalBuckets) {
         // Functions identified as identical.
-        std::vector<BinaryFunction *> &Twins = IBI.second;
+        BinaryFunctionListType &Twins = IBI.second;
         if (Twins.size() < 2)
           continue;
 
@@ -596,6 +604,19 @@ Error IdenticalCodeFolding::runOnFunctions(BinaryContext &BC) {
     ++Iteration;
 
   } while (NumFoldedLastIteration > 0);
+
+  // Flatten folded function chains so FoldedIntoFunction always points
+  // to the root parent.
+  for (auto &BFI : BC.getBinaryFunctions()) {
+    BinaryFunction &BF = BFI.second;
+    if (!BF.isFolded())
+      continue;
+    BinaryFunction *Parent = BF.getFoldedIntoFunction();
+    while (Parent->isFolded())
+      Parent = Parent->getFoldedIntoFunction();
+    if (Parent != BF.getFoldedIntoFunction())
+      BF.setFolded(Parent);
+  }
 
   LLVM_DEBUG({
     // Print functions that are congruent but not identical.
