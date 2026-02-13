@@ -16632,6 +16632,54 @@ bool AArch64TargetLowering::isVectorClearMaskLegal(ArrayRef<int> M,
   return isShuffleMaskLegal(M, VT);
 }
 
+SDValue AArch64TargetLowering::optimizeSetCC(SDNode *N, ISD::CondCode &CCCode,
+                              SDValue LHSLo, SDValue LHSHi, SDValue RHSLo, SDValue RHSHi,
+                              SelectionDAG &DAG) const {
+  SDValue NewRHS = N->getOperand(1);
+  ConstantSDNode *ConstRHS = dyn_cast<ConstantSDNode>(NewRHS.getNode());
+  if (ConstRHS && NewRHS.getValueSizeInBits() == 128) {
+    if (CCCode == ISD::SETEQ || CCCode == ISD::SETNE) {
+      unsigned Opcode = (CCCode == ISD::SETEQ) ? ISD::AND : ISD::OR;
+      SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, CCCode);
+      SDValue HiCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, CCCode);
+      return DAG.getNode(Opcode, SDLoc(N), LoCmp.getValueType(), LoCmp, HiCmp);
+    }
+
+    ConstantSDNode *RHSHiC = dyn_cast<ConstantSDNode>(RHSHi.getNode());
+    if (RHSHiC && RHSHiC->isZero() && (CCCode == ISD::SETUGT || CCCode == ISD::SETUGE)) {
+      // x >  K  <=> (xhi > khi)  || (xhi==khi && xlo >  klo)
+      // x >= K  <=> (xhi > khi)  || (xhi==khi && xlo >= klo)
+      SDValue ZeroHi = DAG.getConstant(0, SDLoc(N), LHSHi.getValueType());
+
+      ISD::CondCode LoCC = (CCCode == ISD::SETUGT) ? ISD::SETULE : ISD::SETULT;
+
+      SDValue HiEq = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, ZeroHi, ISD::SETEQ);
+      SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, LoCC);
+      SDValue Tree = DAG.getNode(ISD::AND, SDLoc(N), N->getValueType(0), HiEq, LoCmp);
+
+      SDValue Zero = DAG.getConstant(0, SDLoc(N), N->getValueType(0));
+      return DAG.getSetCC(SDLoc(N), N->getValueType(0), Tree, Zero, ISD::SETEQ);
+    }
+
+    if (CCCode == ISD::SETULT || CCCode == ISD::SETULE) {
+      // x <  K  <=> (xhi < khi)  || (xhi==khi && xlo <  klo)
+      // x <= K  <=> (xhi < khi)  || (xhi==khi && xlo <= klo)
+      ISD::CondCode Opcode = ISD::SETULT;
+
+      SDValue HiCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, Opcode);
+      SDValue HiEq  = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, ISD::SETEQ);
+      SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, CCCode);
+
+      SDValue LoAnd = DAG.getNode(ISD::AND, SDLoc(N), HiEq.getValueType(), HiEq, LoCmp);
+      SDValue Tree = DAG.getNode(ISD::OR, SDLoc(N), N->getValueType(0), HiCmp, LoAnd);
+
+      SDValue Zero = DAG.getConstant(0, SDLoc(N), N->getValueType(0));
+      return DAG.getSetCC(SDLoc(N), N->getValueType(0), Tree, Zero, ISD::SETNE);
+    }
+  }
+  return SDValue();
+}
+
 /// getVShiftImm - Check if this is a valid build_vector for the immediate
 /// operand of a vector shift operation, where all the elements of the
 /// build_vector must have the same constant integer value.

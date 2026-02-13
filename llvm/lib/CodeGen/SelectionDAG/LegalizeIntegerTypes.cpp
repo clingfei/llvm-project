@@ -5788,6 +5788,13 @@ SDValue DAGTypeLegalizer::ExpandIntOp_SELECT_CC(SDNode *N) {
 SDValue DAGTypeLegalizer::ExpandIntOp_SETCC(SDNode *N) {
   SDValue NewLHS = N->getOperand(0), NewRHS = N->getOperand(1);
   ISD::CondCode CCCode = cast<CondCodeSDNode>(N->getOperand(2))->get();
+  SDValue LHSLo, LHSHi, RHSLo, RHSHi;
+  GetExpandedInteger(NewLHS, LHSLo, LHSHi);
+  GetExpandedInteger(NewRHS, RHSLo, RHSHi);
+  SDValue Value = TLI.optimizeSetCC(N, CCCode, LHSLo, LHSHi, RHSLo, RHSHi,DAG);
+  if (Value.getNode()) {
+    return Value;
+  }
   IntegerExpandSetCCOperands(NewLHS, NewRHS, CCCode, SDLoc(N));
 
   // If ExpandSetCCOperands returned a scalar, use it.

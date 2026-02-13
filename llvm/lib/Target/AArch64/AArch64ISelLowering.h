@@ -153,6 +153,10 @@ public:
   /// shuffle mask can be codegen'd directly.
   bool isVectorClearMaskLegal(ArrayRef<int> M, EVT VT) const override;
 
+  SDValue optimizeSetCC(SDNode *N, ISD::CondCode &CCCode,
+                              SDValue LHSLo, SDValue LHSHi, SDValue RHSLo, SDValue RHSHi,
+                              SelectionDAG &DAG) const override;
+
   /// Return the ISD::SETCC ValueType.
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                          EVT VT) const override;

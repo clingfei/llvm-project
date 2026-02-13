@@ -4432,6 +4432,10 @@ public:
   /// vselect Cond, N2, N1".
   virtual bool isTargetCanonicalSelect(SDNode *N) const { return false; }
 
+  virtual SDValue optimizeSetCC(SDNode *N, ISD::CondCode &CCCode,
+                              SDValue LHSLo, SDValue LHSHi, SDValue RHSLo, SDValue RHSHi,
+                              SelectionDAG &DAG) const { return SDValue(); }
+
   struct DAGCombinerInfo {
     void *DC;  // The DAG Combiner object.
     CombineLevel Level;
