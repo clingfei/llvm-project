@@ -5776,8 +5776,14 @@ SDValue DAGTypeLegalizer::ExpandIntOp_SETCC(SDNode *N) {
   SDValue LHSLo, LHSHi, RHSLo, RHSHi;
   GetExpandedInteger(NewLHS, LHSLo, LHSHi);
   GetExpandedInteger(NewRHS, RHSLo, RHSHi);
-  SDValue Value = TLI.optimizeSetCC(N, CCCode, LHSLo, LHSHi, RHSLo, RHSHi,DAG);
+  errs() << "dumping before optimizeSetCC\n";
+  DAG.dump();
+  SDValue Value = TLI.optimizeSetCC(N, CCCode, LHSLo, LHSHi, RHSLo, RHSHi, DAG);
+  errs() << "dumping after optimizeSetCC\n";
+  DAG.dump();
   if (Value.getNode()) {
+    errs() << "Value: ";
+    Value.dump();  
     return Value;
   }
   IntegerExpandSetCCOperands(NewLHS, NewRHS, CCCode, SDLoc(N));

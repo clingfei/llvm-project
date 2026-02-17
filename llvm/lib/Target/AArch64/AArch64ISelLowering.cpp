@@ -16928,47 +16928,67 @@ bool AArch64TargetLowering::isVectorClearMaskLegal(ArrayRef<int> M,
 SDValue AArch64TargetLowering::optimizeSetCC(SDNode *N, ISD::CondCode &CCCode,
                               SDValue LHSLo, SDValue LHSHi, SDValue RHSLo, SDValue RHSHi,
                               SelectionDAG &DAG) const {
+  errs() << "Old: ";
+  N->dump();
+  SDValue NewLHS = N->getOperand(0);
   SDValue NewRHS = N->getOperand(1);
+  ConstantSDNode *ConstLHS = dyn_cast<ConstantSDNode>(NewLHS.getNode());
   ConstantSDNode *ConstRHS = dyn_cast<ConstantSDNode>(NewRHS.getNode());
-  if (ConstRHS && NewRHS.getValueSizeInBits() == 128) {
-    if (CCCode == ISD::SETEQ || CCCode == ISD::SETNE) {
-      unsigned Opcode = (CCCode == ISD::SETEQ) ? ISD::AND : ISD::OR;
-      SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, CCCode);
-      SDValue HiCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, CCCode);
-      return DAG.getNode(Opcode, SDLoc(N), LoCmp.getValueType(), LoCmp, HiCmp);
-    }
+  if (ConstLHS || !ConstRHS)
+    return SDValue();
+  if (!(NewLHS.getValueType().isInteger() && NewLHS.getValueSizeInBits() == 128) || 
+      !(NewRHS.getValueType().isInteger() && NewRHS.getValueSizeInBits() == 128))
+    return SDValue();
+  ConstantSDNode *RHSLoC = dyn_cast<ConstantSDNode>(RHSLo.getNode());
+  ConstantSDNode *RHSHiC = dyn_cast<ConstantSDNode>(RHSHi.getNode());
+  if (CCCode == ISD::SETEQ || CCCode == ISD::SETNE) {
+    // if ((RHSLoC && (RHSLoC->isZero() || RHSLoC->isAllOnes())) ||
+    //     (RHSHiC && (RHSHiC->isZero() || RHSHiC->isAllOnes())))
+    //   return SDValue();
 
-    ConstantSDNode *RHSHiC = dyn_cast<ConstantSDNode>(RHSHi.getNode());
-    if (RHSHiC && RHSHiC->isZero() && (CCCode == ISD::SETUGT || CCCode == ISD::SETUGE)) {
-      // x >  K  <=> (xhi > khi)  || (xhi==khi && xlo >  klo)
-      // x >= K  <=> (xhi > khi)  || (xhi==khi && xlo >= klo)
-      SDValue ZeroHi = DAG.getConstant(0, SDLoc(N), LHSHi.getValueType());
+    SDValue LoCmpF = DAG.FoldSetCC(N->getValueType(0), LHSLo, RHSLo, CCCode, SDLoc(N));
+    SDValue HiCmpF = DAG.FoldSetCC(N->getValueType(0), LHSHi, RHSHi, CCCode, SDLoc(N));
+    auto IsConstBool = [](SDValue V) {
+      return isa_and_nonnull<ConstantSDNode>(V.getNode());
+    };
+    if (IsConstBool(LoCmpF) || IsConstBool(HiCmpF))
+      return SDValue();
 
-      ISD::CondCode LoCC = (CCCode == ISD::SETUGT) ? ISD::SETULE : ISD::SETULT;
+    SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, CCCode);
+    SDValue HiCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, CCCode);
+    unsigned Opcode = (CCCode == ISD::SETEQ) ? ISD::AND : ISD::OR;
+    return DAG.getNode(Opcode, SDLoc(N), LoCmp.getValueType(), LoCmp, HiCmp);
+  }
 
-      SDValue HiEq = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, ZeroHi, ISD::SETEQ);
-      SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, LoCC);
-      SDValue Tree = DAG.getNode(ISD::AND, SDLoc(N), N->getValueType(0), HiEq, LoCmp);
+  if (RHSHiC && RHSHiC->isZero() && (CCCode == ISD::SETUGT || CCCode == ISD::SETUGE)) {
+    // x >  K  <=> (xhi > khi)  || (xhi==khi && xlo >  klo)
+    // x >= K  <=> (xhi > khi)  || (xhi==khi && xlo >= klo)
+    SDValue ZeroHi = DAG.getConstant(0, SDLoc(N), LHSHi.getValueType());
 
-      SDValue Zero = DAG.getConstant(0, SDLoc(N), N->getValueType(0));
-      return DAG.getSetCC(SDLoc(N), N->getValueType(0), Tree, Zero, ISD::SETEQ);
-    }
+    ISD::CondCode LoCC = (CCCode == ISD::SETUGT) ? ISD::SETULE : ISD::SETULT;
 
-    if (CCCode == ISD::SETULT || CCCode == ISD::SETULE) {
-      // x <  K  <=> (xhi < khi)  || (xhi==khi && xlo <  klo)
-      // x <= K  <=> (xhi < khi)  || (xhi==khi && xlo <= klo)
-      ISD::CondCode Opcode = ISD::SETULT;
+    SDValue HiEq = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, ZeroHi, ISD::SETEQ);
+    SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, LoCC);
+    SDValue Tree = DAG.getNode(ISD::AND, SDLoc(N), N->getValueType(0), HiEq, LoCmp);
 
-      SDValue HiCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, Opcode);
-      SDValue HiEq  = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, ISD::SETEQ);
-      SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, CCCode);
+    SDValue Zero = DAG.getConstant(0, SDLoc(N), N->getValueType(0));
+    return DAG.getSetCC(SDLoc(N), N->getValueType(0), Tree, Zero, ISD::SETEQ);
+  }
 
-      SDValue LoAnd = DAG.getNode(ISD::AND, SDLoc(N), HiEq.getValueType(), HiEq, LoCmp);
-      SDValue Tree = DAG.getNode(ISD::OR, SDLoc(N), N->getValueType(0), HiCmp, LoAnd);
+  if (CCCode == ISD::SETULT || CCCode == ISD::SETULE) {
+    // x <  K  <=> (xhi < khi)  || (xhi==khi && xlo <  klo)
+    // x <= K  <=> (xhi < khi)  || (xhi==khi && xlo <= klo)
+    ISD::CondCode Opcode = ISD::SETULT;
 
-      SDValue Zero = DAG.getConstant(0, SDLoc(N), N->getValueType(0));
-      return DAG.getSetCC(SDLoc(N), N->getValueType(0), Tree, Zero, ISD::SETNE);
-    }
+    SDValue HiCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, Opcode);
+    SDValue HiEq  = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSHi, RHSHi, ISD::SETEQ);
+    SDValue LoCmp = DAG.getSetCC(SDLoc(N), N->getValueType(0), LHSLo, RHSLo, CCCode);
+
+    SDValue LoAnd = DAG.getNode(ISD::AND, SDLoc(N), HiEq.getValueType(), HiEq, LoCmp);
+    SDValue Tree = DAG.getNode(ISD::OR, SDLoc(N), N->getValueType(0), HiCmp, LoAnd);
+
+    SDValue Zero = DAG.getConstant(0, SDLoc(N), N->getValueType(0));
+    return DAG.getSetCC(SDLoc(N), N->getValueType(0), Tree, Zero, ISD::SETNE);
   }
   return SDValue();
 }
